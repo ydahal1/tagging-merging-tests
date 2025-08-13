@@ -26,13 +26,13 @@ else
     target_input=$2
 fi
 
-# Normalize target branch
+# Normalize branch names
+source_branch="candidate-$source_version"
 if [[ "$target_input" == "master" ]]; then
     target_branch="master"
 else
     target_branch="candidate-$target_input"
 fi
-source_branch="candidate-$source_version"
 
 # Validate candidate version format
 candidate_regex='^[0-9]+\.[0-9]+\.x$'
@@ -47,34 +47,33 @@ fi
 
 git fetch origin
 
-# Check if source branch exists
-if ! git show-ref --verify --quiet "refs/heads/$source_branch" &&
-   ! git ls-remote --exit-code --heads origin "$source_branch" &>/dev/null; then
-    error "Source branch '$source_branch' does not exist locally or remotely."
+# Check if source branch exists locally
+if ! git show-ref --verify --quiet "refs/heads/$source_branch"; then
+    error "Source branch '$source_branch' does not exist locally."
     exit 1
 fi
 
-# Check if target branch exists
+# Check if target branch exists locally or remotely
 if ! git show-ref --verify --quiet "refs/heads/$target_branch" &&
    ! git ls-remote --exit-code --heads origin "$target_branch" &>/dev/null; then
     error "Target branch '$target_branch' does not exist locally or remotely."
     exit 1
 fi
 
-# Warn if there are untracked files before merge
+# Warn if there are untracked files
 UNTRACKED_COUNT=$(git ls-files --others --exclude-standard | wc -l | xargs)
 if [[ $UNTRACKED_COUNT -gt 0 ]]; then
     warn "There are $UNTRACKED_COUNT untracked files in the working directory."
 fi
 
-# Checkout and update target branch
+# Checkout target branch and fast-forward from remote
 git checkout "$target_branch"
 if [ $? -ne 0 ]; then
     error "Failed to check out target branch '$target_branch'."
     exit 1
 fi
 
-git merge origin/"$target_branch" --ff-only
+git merge --ff-only origin/"$target_branch" &>/dev/null
 if [ $? -ne 0 ]; then
     error "Target branch '$target_branch' is inconsistent with origin/$target_branch."
     exit 1
@@ -82,14 +81,14 @@ fi
 
 ok "Checking for changes to merge from '$source_branch' into '$target_branch'"
 
-# Attempt the merge with --no-commit
-git merge origin/"$source_branch" --no-commit --no-ff
+# Merge local source branch into target with --no-commit
+git merge "$source_branch" --no-commit --no-ff
 MERGE_STATUS=$?
 
 if [[ $MERGE_STATUS -eq 0 ]]; then
     CONFLICTS=$(git ls-files -u | wc -l | xargs)
     if [[ "$CONFLICTS" -eq 0 ]]; then
-        # Check if there are any actual changes to commit
+        # Check if any actual changes to commit
         if git diff-index --quiet HEAD --; then
             warn "Target branch '$target_branch' is already up-to-date with '$source_branch'. Nothing to merge."
             git merge --abort &>/dev/null
@@ -99,7 +98,7 @@ if [[ $MERGE_STATUS -eq 0 ]]; then
         git push origin "$target_branch"
         ok "Upmerge completed to '$target_branch'"
     else
-        error "Merge conflicts in '$target_branch', please resolve manually."
+        error "Merge conflicts detected in '$target_branch'. Please resolve manually."
         exit 1
     fi
 else
@@ -107,8 +106,8 @@ else
     exit 1
 fi
 
-# Warn again if untracked files remain after merge
+# Warn again if untracked files remain
 UNTRACKED_COUNT_AFTER=$(git ls-files --others --exclude-standard | wc -l | xargs)
 if [[ $UNTRACKED_COUNT_AFTER -gt 0 ]]; then
-    warn "There are still $UNTRACKED_COUNT_AFTER untracked files in the working directory after upmerge."
+    warn "There are still $UNTRACKED_COUNT_AFTER untracked files after upmerge."
 fi
