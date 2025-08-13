@@ -1,6 +1,6 @@
 #!/bin/bash
-# Cherry-picks a commit to a target branch, with optional display if already applied
-# Usage: ./cherry-pick-fix.sh [<source-branch>] [<target-branch>] [--show-commit] [--list N]
+# Cherry-picks a commit to a target branch
+# Usage: ./cherry-pick-fix.sh [<source-branch>] [<target-branch>] [--show-commit] [--list=N]
 
 # Colors
 GREEN="\033[0;32m"
@@ -15,6 +15,7 @@ warn() { echo -e "[${YELLOW}WARN${RESET}] $1"; }
 SHOW_COMMIT=false
 LIST_COMMITS=10   # default number of commits to display
 
+# Parse flags
 for arg in "$@"; do
     if [[ "$arg" == "--show-commit" ]]; then
         SHOW_COMMIT=true
@@ -30,19 +31,15 @@ else
     SOURCE_BRANCH=$1
 fi
 
-# Fetch latest from origin
-git fetch origin
-
-# Check branch exists
-if ! git show-ref --verify --quiet "refs/heads/$SOURCE_BRANCH" &&
-   ! git ls-remote --exit-code --heads origin "$SOURCE_BRANCH" &>/dev/null; then
-    error "Source branch '$SOURCE_BRANCH' does not exist locally or remotely."
+# Check local source branch exists
+if ! git show-ref --verify --quiet "refs/heads/$SOURCE_BRANCH"; then
+    error "Source branch '$SOURCE_BRANCH' does not exist locally."
     exit 1
 fi
 
-# Display latest commits for user
+# Display latest commits from local branch
 echo "Latest $LIST_COMMITS commits on branch '$SOURCE_BRANCH':"
-git log origin/"$SOURCE_BRANCH" -n "$LIST_COMMITS" --pretty=format:"%h  %s"
+git log "$SOURCE_BRANCH" -n "$LIST_COMMITS" --pretty=format:"%h  %s"
 
 # Prompt for commit hash
 read -p "Enter the commit hash to cherry-pick (copy from above list): " COMMIT_HASH
@@ -70,6 +67,9 @@ if ! git diff-index --quiet HEAD --; then
     exit 1
 fi
 
+# Fetch remote for target branch
+git fetch origin
+
 # Checkout target branch
 git checkout "$TARGET_BRANCH"
 if [ $? -ne 0 ]; then
@@ -77,6 +77,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Fast-forward target branch to remote
 git merge --ff-only origin/"$TARGET_BRANCH" &>/dev/null
 
 # Check if commit is already in target
