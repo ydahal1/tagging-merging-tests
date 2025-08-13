@@ -1,81 +1,99 @@
 #!/bin/bash
-# Creates a Tombolo release branch (tombolo-NNN.MMM.PPP) from candidate-NNN.MMM.x
-# Usage: ./create-release.sh [<version>] (e.g., 1.0.3)
+# Cherry-picks a commit or commits from a source branch to a target branch
+# Usage: ./cherry-pick-fix.sh [<commit-hash>] [<target-branch>] [--show-commit]
 
 # Colors
 GREEN="\033[0;32m"
 RED="\033[0;31m"
+YELLOW="\033[0;33m"
 RESET="\033[0m"
 
 ok() { echo -e "[${GREEN}OK${RESET}] $1"; }
 error() { echo -e "[${RED}ERROR${RESET}] $1"; }
+warn() { echo -e "[${YELLOW}WARN${RESET}] $1"; }
 
-# Prompt for version if not provided
+SHOW_COMMIT=false
+for arg in "$@"; do
+    if [[ "$arg" == "--show-commit" ]]; then
+        SHOW_COMMIT=true
+    fi
+done
+
+# Prompt for commit hash if missing
 if [[ -z $1 ]]; then
-    read -p "Enter the release version (e.g., 1.0.3): " version
+    read -p "Enter the commit hash to cherry-pick: " commit_hash
 else
-    version=$1
+    commit_hash=$1
 fi
 
-# Validate version format NNN.MMM.PPP
-if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    error "Invalid version format: '$version' (expected NNN.MMM.PPP, e.g., 1.0.3)"
+# Prompt for target branch if missing
+if [[ -z $2 ]]; then
+    read -p "Enter the target branch (e.g., master or candidate-1.0.x): " target_branch
+else
+    target_branch=$2
+fi
+
+# Validate input
+if [[ -z $commit_hash ]]; then
+    error "No commit hash provided."
+    exit 2
+fi
+if [[ -z $target_branch ]]; then
+    error "No target branch provided."
     exit 2
 fi
 
-# Extract candidate branch (NNN.MMM.x)
-candidate_branch="candidate-$(echo $version | cut -d. -f1,2).x"
-release_branch="tombolo-$version"
-tag="v$version"
-
 git fetch origin
 
-# Check candidate branch exists locally or remotely
-if ! git show-ref --verify --quiet "refs/heads/$candidate_branch" &&
-   ! git ls-remote --exit-code --heads origin "$candidate_branch" &>/dev/null; then
-    error "Candidate branch '$candidate_branch' does not exist locally or on remote."
+# Check if target branch exists
+if ! git show-ref --verify --quiet "refs/heads/$target_branch" &&
+   ! git ls-remote --exit-code --heads origin "$target_branch" &>/dev/null; then
+    error "Target branch '$target_branch' does not exist locally or remotely."
     exit 1
 fi
 
-# Check if release branch already exists locally
-if git show-ref --verify --quiet "refs/heads/$release_branch"; then
-    error "Release branch '$release_branch' already exists locally."
-    exit 1
+# Warn if there are untracked files
+UNTRACKED_COUNT=$(git ls-files --others --exclude-standard | wc -l | xargs)
+if [[ $UNTRACKED_COUNT -gt 0 ]]; then
+    warn "There are $UNTRACKED_COUNT untracked files in the working directory."
 fi
 
-# Check if release branch already exists remotely
-if git ls-remote --exit-code --heads origin "$release_branch" &>/dev/null; then
-    error "Release branch '$release_branch' already exists on remote."
-    exit 1
-fi
-
-# Check if tag already exists
-if git rev-parse "$tag" >/dev/null 2>&1; then
-    error "Tag '$tag' already exists."
-    exit 1
-fi
-
-# Checkout candidate branch and update
-git checkout "$candidate_branch"
+# Checkout target branch and update
+git checkout "$target_branch"
 if [ $? -ne 0 ]; then
-    error "Failed to check out candidate branch '$candidate_branch'."
+    error "Failed to check out target branch '$target_branch'."
     exit 1
 fi
 
-git merge origin/"$candidate_branch" --ff-only
+git merge origin/"$target_branch" --ff-only
 if [ $? -ne 0 ]; then
-    error "Candidate branch '$candidate_branch' is inconsistent with origin/$candidate_branch."
+    error "Target branch '$target_branch' is inconsistent with origin/$target_branch."
     exit 1
 fi
 
-ok "Creating release branch '$release_branch' from '$candidate_branch'"
-git checkout -b "$release_branch"
+# Check if the commit is already in the target branch
+if git merge-base --is-ancestor "$commit_hash" "$target_branch"; then
+    if [[ "$SHOW_COMMIT" == true ]]; then
+        commit_info=$(git log -n 1 --pretty=format:"%h %s" "$commit_hash")
+        warn "Commit $commit_info is already included in '$target_branch'. Nothing to cherry-pick."
+    else
+        warn "Commit '$commit_hash' is already included in '$target_branch'. Nothing to cherry-pick."
+    fi
+    exit 0
+fi
+
+ok "Cherry-picking commit $commit_hash to '$target_branch'..."
+git cherry-pick "$commit_hash"
 if [ $? -ne 0 ]; then
-    error "Failed to create release branch '$release_branch'."
+    error "Conflicts detected during cherry-pick. Please resolve manually."
     exit 1
 fi
 
-# Tag the release
-git tag "$tag"
-git push origin "$release_branch" "$tag"
-ok "Created release branch '$release_branch' and tagged '$tag'"
+git push origin "$target_branch"
+ok "Cherry-picked commit $commit_hash to '$target_branch'"
+
+# Warn again if untracked files remain
+UNTRACKED_COUNT_AFTER=$(git ls-files --others --exclude-standard | wc -l | xargs)
+if [[ $UNTRACKED_COUNT_AFTER -gt 0 ]]; then
+    warn "There are still $UNTRACKED_COUNT_AFTER untracked files in the working directory after cherry-pick."
+fi
