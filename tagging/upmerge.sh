@@ -47,9 +47,20 @@ fi
 
 git fetch origin
 
-# Check if source branch exists locally
-if ! git show-ref --verify --quiet "refs/heads/$source_branch"; then
-    error "Source branch '$source_branch' does not exist locally."
+# Check for unstaged or uncommitted changes *before* switching branches
+WORKING_DIR_DIRTY=$(git status --porcelain)
+if [[ -n "$WORKING_DIR_DIRTY" ]]; then
+    warn "You have uncommitted changes. Please commit or stash them before running upmerge."
+    echo "$WORKING_DIR_DIRTY" | while read -r line; do
+        echo "  $line"
+    done
+    exit 1
+fi
+
+# Check if source branch exists locally or remotely
+if ! git show-ref --verify --quiet "refs/heads/$source_branch" &&
+   ! git ls-remote --exit-code --heads origin "$source_branch" &>/dev/null; then
+    error "Source branch '$source_branch' does not exist locally or remotely."
     exit 1
 fi
 
@@ -60,40 +71,24 @@ if ! git show-ref --verify --quiet "refs/heads/$target_branch" &&
     exit 1
 fi
 
-# Checkout target branch and fast-forward from remote
-git checkout "$target_branch" &>/dev/null
+# Checkout target branch
+git checkout "$target_branch"
 if [ $? -ne 0 ]; then
     error "Failed to check out target branch '$target_branch'."
     exit 1
 fi
 
+# Fast-forward target branch from remote
 git merge --ff-only origin/"$target_branch" &>/dev/null
 if [ $? -ne 0 ]; then
     error "Target branch '$target_branch' is inconsistent with origin/$target_branch."
     exit 1
 fi
 
-ok "Target branch '$target_branch' is up to date with 'origin/$target_branch'"
-
-# Check for unstaged changes — exit early if present
-UNSTAGED_FILES=$(git diff --name-only)
-if [[ -n "$UNSTAGED_FILES" ]]; then
-    warn "Changes not staged for commit:"
-    echo "$UNSTAGED_FILES"
-    error "Please commit or stash changes before running upmerge."
-    exit 1
-fi
-
-# Warn if there are untracked files
-UNTRACKED_FILES=$(git ls-files --others --exclude-standard)
-if [[ -n "$UNTRACKED_FILES" ]]; then
-    warn "There are untracked files in the working directory:"
-    echo "$UNTRACKED_FILES"
-fi
-
+ok "Target branch '$target_branch' is up to date with origin/$target_branch"
 ok "Checking for changes to merge from '$source_branch' into '$target_branch'"
 
-# Merge local source branch into target with --no-commit
+# Merge source branch into target with --no-commit
 git merge "$source_branch" --no-commit --no-ff
 MERGE_STATUS=$?
 
