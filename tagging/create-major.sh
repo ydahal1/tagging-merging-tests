@@ -5,11 +5,13 @@
 # Colors
 GREEN="\033[0;32m"
 RED="\033[0;31m"
+YELLOW="\033[0;33m"
 RESET="\033[0m"
 
 # Functions for colored messages
 ok() { echo -e "[${GREEN}OK${RESET}] $1"; }
 error() { echo -e "[${RED}ERROR${RESET}] $1"; }
+warn() { echo -e "[${YELLOW}WARN${RESET}] $1"; }
 
 # Prompt for major number if not provided
 if [[ -z $1 ]]; then
@@ -29,6 +31,16 @@ new_branch="candidate-$version"
 
 # Always fetch latest remote branches
 git fetch origin --quiet
+
+# Check for uncommitted changes before any branch operation
+WORKING_DIR_DIRTY=$(git status --porcelain)
+if [[ -n "$WORKING_DIR_DIRTY" ]]; then
+    error "You have uncommitted changes. Please commit or stash them before creating a new branch."
+    echo "$WORKING_DIR_DIRTY" | while read -r line; do
+        echo "  $line"
+    done
+    exit 1
+fi
 
 # Check if master exists locally or remotely
 if ! git show-ref --verify --quiet "refs/heads/master" &&
