@@ -45,15 +45,14 @@ if [[ "$target_branch" != "master" && ! $target_input =~ $candidate_regex ]]; th
     exit 2
 fi
 
-git fetch origin
+git fetch origin --quiet
 
-# Check for unstaged or uncommitted changes *before* switching branches
-WORKING_DIR_DIRTY=$(git status --porcelain)
-if [[ -n "$WORKING_DIR_DIRTY" ]]; then
-    warn "You have uncommitted changes. Please commit or stash them before running upmerge."
-    echo "$WORKING_DIR_DIRTY" | while read -r line; do
-        echo "  $line"
-    done
+# Check for uncommitted changes before switching
+UNSTAGED=$(git status --porcelain)
+if [[ -n $UNSTAGED ]]; then
+    warn "You have uncommitted changes:"
+    echo "$UNSTAGED" | awk '{print "  " $0}'
+    error "Please commit or stash changes before running upmerge."
     exit 1
 fi
 
@@ -72,43 +71,39 @@ if ! git show-ref --verify --quiet "refs/heads/$target_branch" &&
 fi
 
 # Checkout target branch
-git checkout "$target_branch"
-if [ $? -ne 0 ]; then
-    error "Failed to check out target branch '$target_branch'."
-    exit 1
+if git show-ref --verify --quiet "refs/heads/$target_branch"; then
+    git checkout "$target_branch" || { error "Failed to check out '$target_branch'"; exit 1; }
+else
+    git checkout -b "$target_branch" "origin/$target_branch" || { error "Failed to check out remote '$target_branch'"; exit 1; }
 fi
 
 # Fast-forward target branch from remote
-git merge --ff-only origin/"$target_branch" &>/dev/null
-if [ $? -ne 0 ]; then
-    error "Target branch '$target_branch' is inconsistent with origin/$target_branch."
-    exit 1
-fi
+git merge --ff-only "origin/$target_branch" &>/dev/null
+ok "Target branch '$target_branch' is up to date with 'origin/$target_branch'"
 
-ok "Target branch '$target_branch' is up to date with origin/$target_branch"
+# Attempt merge quietly
 ok "Checking for changes to merge from '$source_branch' into '$target_branch'"
-
-# Merge source branch into target with --no-commit
-git merge "$source_branch" --no-commit --no-ff
+git merge "$source_branch" --no-commit --no-ff &>/dev/null
 MERGE_STATUS=$?
 
 if [[ $MERGE_STATUS -eq 0 ]]; then
-    CONFLICTS=$(git ls-files -u | wc -l | xargs)
-    if [[ "$CONFLICTS" -eq 0 ]]; then
-        # Check if any actual changes to commit
-        if git diff-index --quiet HEAD --; then
-            warn "Target branch '$target_branch' is already up-to-date with '$source_branch'. Nothing to merge."
-            git merge --abort &>/dev/null
-            exit 0
-        fi
-        git commit -s --no-edit
-        git push origin "$target_branch"
-        ok "Upmerge completed to '$target_branch'"
-    else
-        error "Merge conflicts detected in '$target_branch'. Please resolve manually."
-        exit 1
+    # Check if there are actual changes
+    if git diff-index --quiet HEAD --; then
+        warn "Target branch '$target_branch' is already up-to-date with '$source_branch'. Nothing to merge."
+        git merge --abort &>/dev/null
+        exit 0
     fi
+
+    git commit -s --no-edit &>/dev/null
+    git push origin "$target_branch" &>/dev/null
+    ok "Upmerge completed to '$target_branch'"
 else
-    error "Merge conflicts detected during upmerge."
+    error "Merge conflicts detected during upmerge. Please resolve manually."
     exit 1
+fi
+
+# Warn about untracked files after merge
+UNTRACKED_COUNT=$(git ls-files --others --exclude-standard | wc -l | xargs)
+if [[ $UNTRACKED_COUNT -gt 0 ]]; then
+    warn "There are still $UNTRACKED_COUNT untracked files after upmerge."
 fi
