@@ -60,14 +60,8 @@ if ! git show-ref --verify --quiet "refs/heads/$target_branch" &&
     exit 1
 fi
 
-# Warn if there are untracked files
-UNTRACKED_COUNT=$(git ls-files --others --exclude-standard | wc -l | xargs)
-if [[ $UNTRACKED_COUNT -gt 0 ]]; then
-    warn "There are $UNTRACKED_COUNT untracked files in the working directory."
-fi
-
 # Checkout target branch and fast-forward from remote
-git checkout "$target_branch"
+git checkout "$target_branch" &>/dev/null
 if [ $? -ne 0 ]; then
     error "Failed to check out target branch '$target_branch'."
     exit 1
@@ -77,6 +71,24 @@ git merge --ff-only origin/"$target_branch" &>/dev/null
 if [ $? -ne 0 ]; then
     error "Target branch '$target_branch' is inconsistent with origin/$target_branch."
     exit 1
+fi
+
+ok "Target branch '$target_branch' is up to date with 'origin/$target_branch'"
+
+# Check for unstaged changes — exit early if present
+UNSTAGED_FILES=$(git diff --name-only)
+if [[ -n "$UNSTAGED_FILES" ]]; then
+    warn "Changes not staged for commit:"
+    echo "$UNSTAGED_FILES"
+    error "Please commit or stash changes before running upmerge."
+    exit 1
+fi
+
+# Warn if there are untracked files
+UNTRACKED_FILES=$(git ls-files --others --exclude-standard)
+if [[ -n "$UNTRACKED_FILES" ]]; then
+    warn "There are untracked files in the working directory:"
+    echo "$UNTRACKED_FILES"
 fi
 
 ok "Checking for changes to merge from '$source_branch' into '$target_branch'"
@@ -104,10 +116,4 @@ if [[ $MERGE_STATUS -eq 0 ]]; then
 else
     error "Merge conflicts detected during upmerge."
     exit 1
-fi
-
-# Warn again if untracked files remain
-UNTRACKED_COUNT_AFTER=$(git ls-files --others --exclude-standard | wc -l | xargs)
-if [[ $UNTRACKED_COUNT_AFTER -gt 0 ]]; then
-    warn "There are still $UNTRACKED_COUNT_AFTER untracked files after upmerge."
 fi
