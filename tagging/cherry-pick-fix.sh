@@ -37,9 +37,9 @@ if ! git show-ref --verify --quiet "refs/heads/$SOURCE_BRANCH"; then
     exit 1
 fi
 
-# Display latest commits from local branch in green and indented
+# Display latest commits from local branch with green hash and date
 echo "Latest $LIST_COMMITS commits on branch '$SOURCE_BRANCH':"
-git log "$SOURCE_BRANCH" -n "$LIST_COMMITS" --pretty=format:"  %C(green)%h  %s%C(reset)"
+git log "$SOURCE_BRANCH" -n "$LIST_COMMITS" --pretty=format:$'  \033[0;32m%h\033[0m  %s  %ad' --date=short
 
 # Prompt for commit hash
 read -p "Enter the commit hash to cherry-pick: " COMMIT_HASH
@@ -63,14 +63,12 @@ fi
 
 # Check working tree is clean
 if ! git diff-index --quiet HEAD --; then
-    warn "Changes not staged for commit:"
-    git status --short | sed 's/^/  /'
-    error "Please commit or stash changes before cherry-picking."
+    error "You have uncommitted changes. Please commit or stash before cherry-picking."
     exit 1
 fi
 
 # Fetch remote for target branch
-git fetch origin --quiet
+git fetch origin
 
 # Checkout target branch
 git checkout "$TARGET_BRANCH"
@@ -81,7 +79,6 @@ fi
 
 # Fast-forward target branch to remote
 git merge --ff-only origin/"$TARGET_BRANCH" &>/dev/null
-ok "Target branch '$TARGET_BRANCH' is up to date with origin/$TARGET_BRANCH"
 
 # Check if commit is already in target
 if git merge-base --is-ancestor "$COMMIT_HASH" "$TARGET_BRANCH"; then
