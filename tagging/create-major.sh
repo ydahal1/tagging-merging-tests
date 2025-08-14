@@ -13,52 +13,50 @@ error() { echo -e "[${RED}ERROR${RESET}] $1"; }
 
 # Prompt for major number if not provided
 if [[ -z $1 ]]; then
-    read -p "Enter the new major version number (e.g., 3): " major
+    read -p "Enter the new major version number (e.g., 3 to create candidate-3.0.x): " major
 else
     major=$1
 fi
 
 # Validate input: must be a number
-if ! [[ $major =~ ^[0-9]+$ ]]; then
-    error "Invalid major version number: '$major'"
+if [[ -z $major || ! $major =~ ^[0-9]+$ ]]; then
+    error "Invalid major version number: '$major' (expected a single number like 3)"
     exit 2
 fi
 
 version="${major}.0.x"
 new_branch="candidate-$version"
 
-git fetch origin
+# Always fetch latest remote branches
+git fetch origin --quiet
 
-# Check if branch already exists locally
-if git show-ref --verify --quiet "refs/heads/$new_branch"; then
-    error "Branch '$new_branch' already exists locally."
+# Check if master exists locally or remotely
+if ! git show-ref --verify --quiet "refs/heads/master" &&
+   ! git ls-remote --exit-code --heads origin master &>/dev/null; then
+    error "Branch 'master' does not exist locally or on remote."
     exit 1
 fi
 
-# Check if branch already exists remotely
-if git ls-remote --exit-code --heads origin "$new_branch" &>/dev/null; then
-    error "Branch '$new_branch' already exists on remote."
+# Check if new branch already exists locally or remotely
+if git show-ref --verify --quiet "refs/heads/$new_branch" ||
+   git ls-remote --exit-code --heads origin "$new_branch" &>/dev/null; then
+    error "Branch '$new_branch' already exists locally or on remote."
     exit 1
 fi
 
-git checkout master
-if [ $? -ne 0 ]; then
-    error "Target branch master failed to check out."
-    exit 1
+# Checkout master from local or remote
+if git show-ref --verify --quiet "refs/heads/master"; then
+    git checkout master || { error "Failed to check out local 'master'"; exit 1; }
+else
+    git checkout -b master origin/master || { error "Failed to check out remote 'master'"; exit 1; }
 fi
 
-git merge origin/master --ff-only
-if [ $? -ne 0 ]; then
-    error "Target branch master is inconsistent with origin/master."
-    exit 1
-fi
+# Merge from remote to ensure it’s up to date
+git merge origin/master --ff-only || { error "Branch 'master' is inconsistent with origin/master"; exit 1; }
 
+# Create and push new branch
 ok "Creating new major branch $new_branch from master"
-git checkout -b "$new_branch"
-if [ $? -ne 0 ]; then
-    error "Failed to create $new_branch."
-    exit 1
-fi
+git checkout -b "$new_branch" || { error "Failed to create $new_branch"; exit 1; }
+git push origin "$new_branch" || { error "Failed to push $new_branch"; exit 1; }
 
-git push origin "$new_branch"
 ok "Created and pushed $new_branch"
