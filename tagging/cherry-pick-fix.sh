@@ -37,9 +37,9 @@ if ! git show-ref --verify --quiet "refs/heads/$SOURCE_BRANCH"; then
     exit 1
 fi
 
-# Display latest commits from local branch with green hash and date
+# Display latest commits from local branch with green hash, message, date, and time
 echo "Latest $LIST_COMMITS commits on branch '$SOURCE_BRANCH':"
-git log "$SOURCE_BRANCH" -n "$LIST_COMMITS" --pretty=format:$'  \033[0;32m%h\033[0m  %s  %ad' --date=short
+git log "$SOURCE_BRANCH" -n "$LIST_COMMITS" --pretty=format:$'  \033[0;32m%h\033[0m  %s  %ad' --date=format:'%Y-%m-%d %H:%M:%S'
 
 # Prompt for commit hash
 read -p "Enter the commit hash to cherry-pick: " COMMIT_HASH
